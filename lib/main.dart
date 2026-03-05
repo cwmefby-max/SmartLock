@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_server_client.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -61,14 +63,21 @@ class MainNavigator extends StatefulWidget {
 }
 
 class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateMixin {
+  // --- KONFIGURASI MQTT ---
+  late MqttServerClient client;
+  String statusMqtt = "Connecting...";
+  final String broker = 'broker.emqx.io'; 
+  final String topicControl = 'smartlock/control';
+
+  // --- STATE UI ---
   bool isIotVisible = true;
   bool isLocked = true;
   bool isRelayOn = false;
   bool isAlarmOn = false;
-  bool isRouteActive = false;
   bool isStartActive = false;
   bool isSeatActive = false;
   bool isFuelActive = false;
+  bool isRouteActive = false;
   bool isFocusActive = false;
   bool isCompassActive = false;
 
@@ -85,6 +94,8 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
   @override
   void initState() {
     super.initState();
+    _setupMqtt();
+
     _infoPageController = PageController(initialPage: _currentVirtualPage);
     _vehiclePageController = PageController(initialPage: _currentVirtualPage);
 
@@ -108,9 +119,39 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
     });
   }
 
-  void _vibrateInstan() {
-    HapticFeedback.lightImpact();
+  // --- LOGIKA MQTT ---
+  Future<void> _setupMqtt() async {
+    client = MqttServerClient(broker, 'smartlock_client_${math.Random().nextInt(1000)}');
+    client.port = 1883;
+    client.keepAlivePeriod = 20;
+    client.onDisconnected = () => setState(() => statusMqtt = "Disconnected");
+    client.onConnected = () => setState(() => statusMqtt = "Connected");
+
+    final connMess = MqttConnectMessage()
+        .withClientIdentifier('smartlock_client_${math.Random().nextInt(100)}')
+        .startClean()
+        .withWillQos(MqttQos.atLeastOnce);
+    client.connectionMessage = connMess;
+
+    try {
+      await client.connect();
+    } catch (e) {
+      debugPrint('MQTT Error: $e');
+      if (mounted) setState(() => statusMqtt = "Error Connection");
+      client.disconnect();
+    }
   }
+
+  void _publish(String msg) {
+    if (statusMqtt == "Connected") {
+      final builder = MqttClientPayloadBuilder();
+      builder.addString(msg);
+      client.publishMessage(topicControl, MqttQos.exactlyOnce, builder.payload!);
+      debugPrint('MQTT Sent: $msg');
+    }
+  }
+
+  void _vibrate() => HapticFeedback.lightImpact();
 
   void _triggerScan() async {
     setState(() => _showScanAnim = true);
@@ -120,11 +161,9 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
   }
 
   void _toggleIotPanel() {
-    _vibrateInstan();
+    _vibrate();
     if (isIotVisible) {
-      _panelController.reverse().then((_) {
-        if (mounted) setState(() => isIotVisible = false);
-      });
+      _panelController.reverse().then((_) { if (mounted) setState(() => isIotVisible = false); });
     } else {
       setState(() => isIotVisible = true);
       _panelController.forward();
@@ -138,6 +177,7 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
     _panelController.dispose();
     _infoPageController.dispose();
     _vehiclePageController.dispose();
+    client.disconnect();
     super.dispose();
   }
 
@@ -173,12 +213,12 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
       body: Stack(
         children: [
           Container(width: double.infinity, height: double.infinity, color: isDark ? const Color(0xFF151E24) : const Color(0xFFF0F2F5)),
-
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(15.0),
               child: Column(
                 children: [
+                  // --- HEADER ---
                   Container(
                     decoration: neuBox(),
                     padding: const EdgeInsets.all(18),
@@ -190,15 +230,18 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text("SmartLock", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                                const Text("Pati, Jawa Tengah", style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w600)),
+                                const Text("SmartLock", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                                Text(statusMqtt, style: TextStyle(fontSize: 10, color: statusMqtt == "Connected" ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
                               ],
                             ),
                             Row(
                               children: [
+                                // --- FUNGSI 5: BUZZER (TRIGGER_BUZZER) ---
                                 _buildTopIcon(isAlarmOn ? Icons.notifications_active : Icons.notifications, isAlarmOn, () {
+                                  _vibrate();
                                   setState(() => isAlarmOn = true);
-                                  Future.delayed(const Duration(milliseconds: 500), () {
+                                  _publish("TRIGGER_BUZZER"); 
+                                  Future.delayed(const Duration(milliseconds: 800), () {
                                     if (mounted) setState(() => isAlarmOn = false);
                                   });
                                 }),
@@ -228,7 +271,7 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
                             Row(mainAxisAlignment: MainAxisAlignment.center, children: [_buildDot(activePageIndex == 0), const SizedBox(width: 6), _buildDot(activePageIndex == 1)]),
                             Positioned(
                               right: 0,
-                              child: Text("version 1.0.0 by Mefby", style: TextStyle(fontSize: 8, color: Colors.grey.withValues(alpha: 0.7), fontWeight: FontWeight.bold)),
+                              child: Text("v1.0.0 by Mefby", style: TextStyle(fontSize: 8, color: Colors.grey.withValues(alpha: 0.7), fontWeight: FontWeight.bold)),
                             )
                           ],
                         ),
@@ -236,6 +279,7 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
                     ),
                   ),
 
+                  // --- KONTROL UNIT ---
                   Expanded(
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(30),
@@ -253,45 +297,55 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
                                   children: [
                                     Text("KONTROL UNIT", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: isDark ? Colors.white70 : Colors.black54)),
                                     const SizedBox(height: 4),
-                                    SizedBox(
-                                      height: 15,
-                                      child: PageView.builder(
-                                        controller: _vehiclePageController,
-                                        scrollDirection: Axis.vertical,
-                                        physics: const NeverScrollableScrollPhysics(),
-                                        itemBuilder: (context, index) => Center(child: Text(index % 2 == 0 ? "Aerox 155 VVA" : "W 3601 QY", style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold))),
-                                      ),
-                                    ),
+                                    const Text("W 3601 QY", style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
                                     const Spacer(),
                                     _buildStartButton(),
                                     const Spacer(),
                                     Row(
                                       children: [
+                                        // --- FUNGSI 1: RELAY_ONOFF (TOGGLE) ---
                                         Expanded(child: _buildVerticalGridBtn(isRelayOn ? "ON" : "OFF", Icons.power_settings_new_rounded, isRelayOn, () {
-                                          if (!isLocked) {
-                                            _vibrateInstan();
-                                            setState(() => isRelayOn = !isRelayOn);
-                                            if (isRelayOn) _triggerScan();
-                                          }
-                                        }, isDisabled: isLocked)),
+                                          _vibrate();
+                                          setState(() => isRelayOn = !isRelayOn);
+                                          _publish(isRelayOn ? "RELAY_ON" : "RELAY_OFF");
+                                          if (isRelayOn) _triggerScan();
+                                        })),
                                         const SizedBox(width: 15),
                                         Expanded(
                                           child: Column(
                                             children: [
-                                              _buildHoldBtn("SEAT", Icons.archive_rounded, isSeatActive, isRelayOn, (val) {
-                                                if(!isRelayOn) { if(val) _vibrateInstan(); setState(() => isSeatActive = val); }
+                                              // --- FUNGSI 2: RELAY_JOK (MOMENTARY TRIGGER) ---
+                                              _buildHoldBtn("SEAT", Icons.archive_rounded, isSeatActive, isRelayOn, (isPressed) {
+                                                if(!isRelayOn) { 
+                                                  if(isPressed) { 
+                                                    _vibrate(); 
+                                                    _publish("OPEN_JOK"); 
+                                                  }
+                                                  setState(() => isSeatActive = isPressed); 
+                                                }
                                               }),
                                               const SizedBox(height: 15),
-                                              _buildHoldBtn("FUEL", Icons.local_gas_station_rounded, isFuelActive, isRelayOn, (val) {
-                                                if(!isRelayOn) { if(val) _vibrateInstan(); setState(() => isFuelActive = val); }
+                                              // --- FUNGSI 3: RELAY_TANGKI (MOMENTARY TRIGGER) ---
+                                              _buildHoldBtn("FUEL", Icons.local_gas_station_rounded, isFuelActive, isRelayOn, (isPressed) {
+                                                if(!isRelayOn) { 
+                                                  if(isPressed) { 
+                                                    _vibrate(); 
+                                                    _publish("OPEN_TANGKI"); 
+                                                  }
+                                                  setState(() => isFuelActive = isPressed); 
+                                                }
                                               }),
                                             ],
                                           ),
                                         ),
                                         const SizedBox(width: 15),
+                                        // LOCK/UNLOCK (Lupakan dulu, hanya UI Toggle)
                                         Expanded(child: _buildVerticalGridBtn(isLocked ? "LOCKED" : "UNLOCK", isLocked ? Icons.lock_rounded : Icons.lock_open_rounded, isLocked, () {
-                                          if(!isRelayOn) { _vibrateInstan(); setState(() => isLocked = !isLocked); }
-                                        }, isDisabled: isRelayOn)),
+                                          if(!isRelayOn) { 
+                                            _vibrate(); 
+                                            setState(() => isLocked = !isLocked); 
+                                          }
+                                        })),
                                       ],
                                     ),
                                   ],
@@ -314,11 +368,11 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  _buildFloatBtn(Icons.my_location_rounded, () { _vibrateInstan(); setState(() => isFocusActive = true); Future.delayed(const Duration(milliseconds: 200), () { if (mounted) setState(() => isFocusActive = false); }); }, isActive: isFocusActive),
+                  _buildFloatBtn(Icons.my_location_rounded, () { _vibrate(); setState(() => isFocusActive = true); Future.delayed(const Duration(milliseconds: 200), () { if (mounted) setState(() => isFocusActive = false); }); }, isActive: isFocusActive),
                   const SizedBox(width: 25),
-                  _buildFloatBtn(Icons.map_rounded, () { _vibrateInstan(); setState(() => isRouteActive = !isRouteActive); }, isActive: isRouteActive),
+                  _buildFloatBtn(Icons.map_rounded, () { _vibrate(); setState(() => isRouteActive = !isRouteActive); }, isActive: isRouteActive),
                   const SizedBox(width: 25),
-                  _buildFloatBtn(Icons.explore_rounded, () { _vibrateInstan(); setState(() => isCompassActive = true); Future.delayed(const Duration(milliseconds: 200), () { if (mounted) setState(() => isCompassActive = false); }); }, isActive: isCompassActive),
+                  _buildFloatBtn(Icons.explore_rounded, () { _vibrate(); setState(() => isCompassActive = true); Future.delayed(const Duration(milliseconds: 200), () { if (mounted) setState(() => isCompassActive = false); }); }, isActive: isCompassActive),
                 ],
               ),
             )
@@ -340,7 +394,14 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
             ),
           ),
         GestureDetector(
-          onTapDown: (_) { if(isRelayOn) { _vibrateInstan(); setState(() => isStartActive = true); } },
+          // --- FUNGSI 4: RELAY_STARTER (MOMENTARY TRIGGER) ---
+          onTapDown: (_) { 
+            if(isRelayOn) { 
+              _vibrate(); 
+              setState(() => isStartActive = true); 
+              _publish("START_ENGINE"); 
+            } 
+          },
           onTapUp: (_) => setState(() => isStartActive = false),
           onTapCancel: () => setState(() => isStartActive = false),
           child: Opacity(
