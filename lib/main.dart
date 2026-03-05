@@ -118,12 +118,11 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
   }
 
   Future<void> _setupMqtt() async {
-    // Generate ID acak agar tidak bentrok dengan user lain di EMQX
     String clientIdentifier = 'smartlock_mefby_${math.Random().nextInt(10000)}';
     client = MqttServerClient(broker, clientIdentifier);
     client.port = 1883;
     client.keepAlivePeriod = 20;
-    client.logging(on: false); // Matikan logging jika tidak perlu
+    client.logging(on: true);
 
     client.onDisconnected = () {
       if (mounted) setState(() => statusMqtt = "Disconnected");
@@ -135,7 +134,7 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
 
     final connMess = MqttConnectMessage()
         .withClientIdentifier(clientIdentifier)
-        .startClean()
+        .startClean() 
         .withWillQos(MqttQos.atLeastOnce);
     client.connectionMessage = connMess;
 
@@ -149,7 +148,7 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
   }
 
   void _publish(String msg) {
-    if (statusMqtt == "Connected") {
+    if (client.connectionStatus!.state == MqttConnectionState.connected) {
       final builder = MqttClientPayloadBuilder();
       builder.addString(msg);
       client.publishMessage(topicControl, MqttQos.exactlyOnce, builder.payload!);
@@ -190,11 +189,11 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
   BoxDecoration neuBox({bool isPressed = false, double borderRadius = 20, bool isDisabled = false}) {
     bool isDark = widget.isDark;
     Color bg = isDark ? const Color(0xFF1E272E) : const Color(0xFFFDFDFD);
-    if (isDisabled) bg = bg.withValues(alpha: 0.5);
+    if (isDisabled) bg = bg.withAlpha(128);
 
     Color shadowDark = isDark
-        ? Colors.black.withValues(alpha: 0.4)
-        : const Color(0xFFD1D9E6).withValues(alpha: 0.5);
+        ? Colors.black.withAlpha(102)
+        : const Color(0xFFD1D9E6).withAlpha(128);
 
     return BoxDecoration(
       color: bg,
@@ -258,7 +257,7 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
                           ],
                         ),
                         const SizedBox(height: 15),
-                        Divider(color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.05)),
+                        Divider(color: isDark ? Colors.white.withAlpha(13) : Colors.black.withAlpha(13)),
                         SizedBox(
                           height: 60,
                           child: PageView.builder(
@@ -275,7 +274,7 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
                             Row(mainAxisAlignment: MainAxisAlignment.center, children: [_buildDot(activePageIndex == 0), const SizedBox(width: 6), _buildDot(activePageIndex == 1)]),
                             Positioned(
                               right: 0,
-                              child: Text("v1.0.0 by Mefby", style: TextStyle(fontSize: 8, color: Colors.grey.withValues(alpha: 0.7), fontWeight: FontWeight.bold)),
+                              child: Text("v1.0.0 by Mefby", style: TextStyle(fontSize: 8, color: Colors.grey.withAlpha(179), fontWeight: FontWeight.bold)),
                             )
                           ],
                         ),
@@ -470,7 +469,7 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
     child: Container(width: 42, height: 42, decoration: neuBox(isPressed: active, borderRadius: 12), child: Icon(icon, size: 20, color: active ? const Color(0xFFFF7675) : (widget.isDark ? Colors.white : const Color(0xFF2C3E50)))),
   );
 
-  Widget _buildDot(bool active) => Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: active ? Colors.blueAccent : Colors.grey.withValues(alpha: 0.3)));
+  Widget _buildDot(bool active) => Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: active ? Colors.blueAccent : Colors.grey.withAlpha(77)));
   Widget _buildStat(String label, String value) => Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: widget.isDark ? Colors.white : const Color(0xFF2C3E50))), Text(label, style: const TextStyle(fontSize: 8, color: Colors.grey, fontWeight: FontWeight.bold))]);
 
   Widget _buildFloatBtn(IconData icon, VoidCallback onTap, {required bool isActive}) => GestureDetector(
@@ -490,7 +489,7 @@ class DottedCirclePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final Paint paint = Paint()
-      ..color = Colors.blueAccent.withValues(alpha: 0.6)
+      ..color = Colors.blueAccent.withAlpha(153)
       ..style = PaintingStyle.fill;
 
     double radius = size.width / 2;
