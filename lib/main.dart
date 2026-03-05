@@ -63,13 +63,11 @@ class MainNavigator extends StatefulWidget {
 }
 
 class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateMixin {
-  // --- KONFIGURASI MQTT ---
   late MqttServerClient client;
   String statusMqtt = "Connecting...";
   final String broker = 'broker.emqx.io'; 
   final String topicControl = 'smartlock/control';
 
-  // --- STATE UI ---
   bool isIotVisible = true;
   bool isLocked = true;
   bool isRelayOn = false;
@@ -119,16 +117,24 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
     });
   }
 
-  // --- LOGIKA MQTT ---
   Future<void> _setupMqtt() async {
-    client = MqttServerClient(broker, 'smartlock_client_${math.Random().nextInt(1000)}');
+    // Generate ID acak agar tidak bentrok dengan user lain di EMQX
+    String clientIdentifier = 'smartlock_mefby_${math.Random().nextInt(10000)}';
+    client = MqttServerClient(broker, clientIdentifier);
     client.port = 1883;
     client.keepAlivePeriod = 20;
-    client.onDisconnected = () => setState(() => statusMqtt = "Disconnected");
-    client.onConnected = () => setState(() => statusMqtt = "Connected");
+    client.logging(on: false); // Matikan logging jika tidak perlu
+
+    client.onDisconnected = () {
+      if (mounted) setState(() => statusMqtt = "Disconnected");
+    };
+    
+    client.onConnected = () {
+      if (mounted) setState(() => statusMqtt = "Connected");
+    };
 
     final connMess = MqttConnectMessage()
-        .withClientIdentifier('smartlock_client_${math.Random().nextInt(100)}')
+        .withClientIdentifier(clientIdentifier)
         .startClean()
         .withWillQos(MqttQos.atLeastOnce);
     client.connectionMessage = connMess;
@@ -137,7 +143,7 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
       await client.connect();
     } catch (e) {
       debugPrint('MQTT Error: $e');
-      if (mounted) setState(() => statusMqtt = "Error Connection");
+      if (mounted) setState(() => statusMqtt = "Error: $e");
       client.disconnect();
     }
   }
@@ -218,7 +224,6 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
               padding: const EdgeInsets.all(15.0),
               child: Column(
                 children: [
-                  // --- HEADER ---
                   Container(
                     decoration: neuBox(),
                     padding: const EdgeInsets.all(18),
@@ -236,7 +241,6 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
                             ),
                             Row(
                               children: [
-                                // --- FUNGSI 5: BUZZER (TRIGGER_BUZZER) ---
                                 _buildTopIcon(isAlarmOn ? Icons.notifications_active : Icons.notifications, isAlarmOn, () {
                                   _vibrate();
                                   setState(() => isAlarmOn = true);
@@ -279,7 +283,6 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
                     ),
                   ),
 
-                  // --- KONTROL UNIT ---
                   Expanded(
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(30),
@@ -303,7 +306,6 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
                                     const Spacer(),
                                     Row(
                                       children: [
-                                        // --- FUNGSI 1: RELAY_ONOFF (TOGGLE) ---
                                         Expanded(child: _buildVerticalGridBtn(isRelayOn ? "ON" : "OFF", Icons.power_settings_new_rounded, isRelayOn, () {
                                           _vibrate();
                                           setState(() => isRelayOn = !isRelayOn);
@@ -314,7 +316,6 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
                                         Expanded(
                                           child: Column(
                                             children: [
-                                              // --- FUNGSI 2: RELAY_JOK (MOMENTARY TRIGGER) ---
                                               _buildHoldBtn("SEAT", Icons.archive_rounded, isSeatActive, isRelayOn, (isPressed) {
                                                 if(!isRelayOn) { 
                                                   if(isPressed) { 
@@ -325,7 +326,6 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
                                                 }
                                               }),
                                               const SizedBox(height: 15),
-                                              // --- FUNGSI 3: RELAY_TANGKI (MOMENTARY TRIGGER) ---
                                               _buildHoldBtn("FUEL", Icons.local_gas_station_rounded, isFuelActive, isRelayOn, (isPressed) {
                                                 if(!isRelayOn) { 
                                                   if(isPressed) { 
@@ -339,7 +339,6 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
                                           ),
                                         ),
                                         const SizedBox(width: 15),
-                                        // LOCK/UNLOCK (Lupakan dulu, hanya UI Toggle)
                                         Expanded(child: _buildVerticalGridBtn(isLocked ? "LOCKED" : "UNLOCK", isLocked ? Icons.lock_rounded : Icons.lock_open_rounded, isLocked, () {
                                           if(!isRelayOn) { 
                                             _vibrate(); 
@@ -361,7 +360,7 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
               ),
             ),
           ),
-
+          
           if (!isIotVisible)
             Positioned(
               bottom: 40, left: 0, right: 0,
@@ -394,7 +393,6 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
             ),
           ),
         GestureDetector(
-          // --- FUNGSI 4: RELAY_STARTER (MOMENTARY TRIGGER) ---
           onTapDown: (_) { 
             if(isRelayOn) { 
               _vibrate(); 
